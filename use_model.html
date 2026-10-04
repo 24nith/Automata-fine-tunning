@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f3ed">
+  <title>Use trained model — Automata Fine Tuning</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    :root{color-scheme:light;--paper:#f4f3ed;--white:#fffefa;--ink:#20251f;--muted:#777c72;--line:#e5e4db;--green:#c9f05b;--green-dark:#4d6426;--coral:#f17b5d;--dark:#22291f;--mono:'DM Mono',monospace;--sans:'Manrope',sans-serif}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.55 var(--sans);min-height:100vh}button,a,textarea{font:inherit}button{cursor:pointer;color:inherit}.topbar{height:64px;border-bottom:1px solid var(--line);background:rgba(255,254,250,.7);display:flex;align-items:center;justify-content:space-between;padding:0 max(22px,calc((100vw - 1040px)/2))}.brand{display:flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;font-weight:800;font-size:14px}.brand-mark{width:29px;height:29px;border-radius:8px;background:var(--green);display:grid;place-items:center}.brand-mark svg{width:16px;height:16px}.brand span{color:var(--muted);font-weight:500}.back-link{display:inline-flex;align-items:center;gap:7px;color:#53653a;text-decoration:none;font-size:11px;font-weight:700}.back-link svg{width:15px;height:15px}.page{max-width:960px;margin:0 auto;padding:42px 22px 56px}.heading{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin-bottom:22px}.eyebrow{font:10px var(--mono);text-transform:uppercase;letter-spacing:1px;color:#687153;display:flex;align-items:center;gap:8px}.eyebrow:before{content:'';width:17px;height:2px;background:var(--coral)}h1{font-size:28px;line-height:1.2;margin:8px 0 5px;font-weight:800}.subtitle{margin:0;color:var(--muted);font-size:12px}.model-status{display:flex;align-items:center;gap:8px;border:1px solid #d8dfc8;border-radius:5px;background:#f5f8eb;padding:8px 10px;color:#596348;font:10px var(--mono);max-width:320px;overflow-wrap:anywhere}.status-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:#8db43e}.model-status.offline{border-color:#f0d2c2;background:#fff6ef;color:#88513d}.model-status.offline .status-dot{background:var(--coral)}.chat{border:1px solid var(--line);border-radius:7px;background:var(--white);overflow:hidden}.chat-head{height:52px;padding:0 17px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.chat-title{font-size:11px;font-weight:800;display:flex;align-items:center;gap:8px}.chat-title svg{width:15px;height:15px;color:#718544}.clear-button{height:31px;width:31px;display:grid;place-items:center;border:1px solid var(--line);background:var(--white);border-radius:5px}.clear-button svg{width:14px;height:14px}.clear-button:hover{border-color:#bfc5af}.messages{min-height:340px;max-height:55vh;overflow:auto;padding:22px clamp(14px,4vw,34px);display:flex;flex-direction:column;gap:17px}.empty-state{margin:auto;max-width:380px;text-align:center;color:var(--muted);padding:35px 12px}.empty-icon{margin:0 auto 12px;width:39px;height:39px;border-radius:50%;background:#edf2df;color:#627e2a;display:grid;place-items:center}.empty-icon svg{width:18px;height:18px}.empty-state strong{display:block;color:var(--ink);font-size:13px;margin-bottom:4px}.empty-state p{font-size:11px;margin:0}.message{max-width:min(76%,620px);display:flex;flex-direction:column;gap:5px;animation:arrive .18s ease-out}.message.user{align-self:flex-end}.message.assistant{align-self:flex-start}.message-label{font:9px var(--mono);text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}.bubble{border:1px solid var(--line);border-radius:6px;padding:11px 13px;background:#f7f6f1;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}.user .bubble{background:#eef4dc;border-color:#dce6c5}.message.error .bubble{background:#fff5ef;border-color:#f0d2c2;color:#774b3b}.message.pending .bubble{color:var(--muted)}.composer{border-top:1px solid var(--line);padding:13px 15px 11px;background:#fbfaf6}.composer-row{display:flex;gap:9px;align-items:flex-end}.prompt{display:block;width:100%;min-height:48px;max-height:150px;resize:vertical;border:1px solid #ddded4;border-radius:5px;background:white;padding:11px 12px;color:var(--ink);font:12px/1.5 var(--sans);outline:none}.prompt:focus{border-color:#91a65f;box-shadow:0 0 0 2px #91a65f24}.send-button{width:42px;height:42px;flex:0 0 42px;border:1px solid var(--green);border-radius:5px;background:var(--green);display:grid;place-items:center}.send-button:hover{background:#bde744}.send-button:disabled{opacity:.5;cursor:wait}.send-button svg{width:17px;height:17px}.composer-note{font-size:9px;color:var(--muted);margin:7px 2px 0}.notice{display:none;margin:12px 15px 0;padding:10px 12px;border:1px solid #f0d2c2;border-radius:5px;background:#fff6ef;color:#88513d;font-size:11px}.notice.show{display:block}.notice a{color:inherit;font-weight:800}.footer{display:flex;justify-content:space-between;gap:14px;margin-top:13px;color:var(--muted);font:9px var(--mono);text-transform:uppercase;letter-spacing:.4px}.footer span:last-child{text-align:right}@keyframes arrive{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+    @media(max-width:620px){.topbar{height:56px;padding:0 15px}.page{padding:27px 13px 35px}.heading{align-items:flex-start;flex-direction:column;margin-bottom:16px}h1{font-size:24px}.model-status{max-width:100%}.messages{min-height:310px;max-height:58vh;padding:16px 12px}.message{max-width:92%}.composer{padding:10px}.footer{flex-direction:column}.footer span:last-child{text-align:left}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
+    .model-picker{display:grid;grid-template-columns:120px minmax(0,1fr) auto;align-items:center;gap:12px;margin:0 0 14px}.model-picker label{font:10px var(--mono);text-transform:uppercase;color:var(--muted)}.model-picker select{width:100%;min-width:0;min-height:39px;padding:8px 34px 8px 10px;border:1px solid #ddded4;border-radius:5px;background:var(--white);color:var(--ink);font:11px var(--sans)}.model-picker select:focus{outline:2px solid #91a65f;outline-offset:1px}.model-picker select:disabled{color:var(--muted);background:#f7f6f1}.action-row{display:flex;gap:8px;flex-wrap:wrap}.action-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:39px;padding:8px 12px;border:1px solid #daddd2;border-radius:5px;background:#f8f7f3;color:#2e3826;font-weight:700;cursor:pointer}.action-button.delete{border-color:#efd0c5;background:#fff3ef;color:#7d3d2f}.action-button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:620px){.model-picker{grid-template-columns:1fr;gap:5px;margin-bottom:11px}.action-row{width:100%}.action-button{flex:1 1 auto}}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark"><i data-lucide="workflow"></i></span>Automata <span>Fine Tuning</span></a>
+    <a class="back-link" href="/"><i data-lucide="arrow-left"></i>Training workspace</a>
+  </header>
+  <main class="page">
+    <section class="heading">
+      <div><div class="eyebrow">LOCAL MODEL / CHAT</div><h1>Use the trained model</h1><p class="subtitle">Ask a question and review the model’s generated response.</p></div>
+      <div class="model-status offline" id="modelStatus" role="status"><span class="status-dot"></span><span id="statusText">Checking for a completed model…</span></div>
+    </section>
+    <div class="model-picker"><label for="modelSelect">Trained model</label><select id="modelSelect" aria-label="Choose a trained model" disabled><option>Loading trained models…</option></select><div class="action-row"><button type="button" class="action-button" id="downloadModelBtn" aria-label="Download trained model" disabled>Download trained model</button><button type="button" class="action-button delete" id="deleteModelBtn" aria-label="Delete trained model" disabled>Delete trained model</button></div></div>
+    <section class="chat" aria-label="Chat with trained model">
+      <div class="chat-head"><div class="chat-title"><i data-lucide="messages-square"></i><span id="chatModelName">Model conversation</span></div><button class="clear-button" id="clearChat" type="button" title="Clear conversation" aria-label="Clear conversation"><i data-lucide="trash-2"></i></button></div>
+      <div class="notice" id="notice" role="alert"></div>
+      <div class="messages" id="messages" aria-live="polite" aria-label="Conversation">
+        <div class="empty-state" id="emptyState"><div class="empty-icon"><i data-lucide="message-circle"></i></div><strong>Start a conversation</strong><p>Your messages are sent to the selected completed model run.</p></div>
+      </div>
+      <form class="composer" id="chatForm">
+        <div class="composer-row"><textarea class="prompt" id="prompt" rows="2" maxlength="4000" placeholder="Ask the trained model…" aria-label="Message" required></textarea><button class="send-button" id="sendButton" type="submit" title="Send message" aria-label="Send message"><i data-lucide="arrow-up"></i></button></div>
+        <p class="composer-note">Generated responses can be inaccurate. Verify important information before using it.</p>
+      </form>
+    </section>
+    <div class="footer"><span>Inference runs locally on this device</span><span id="runInfo">No completed run selected</span></div>
+  </main>
+  <script>
+    const messages = document.querySelector('#messages');
+    const promptField = document.querySelector('#prompt');
+    const sendButton = document.querySelector('#sendButton');
+    const notice = document.querySelector('#notice');
+    const modelStatus = document.querySelector('#modelStatus');
+    let activeJob = null;
+    let pending = false;
+    let trainedModels = [];
+
+    function refreshIcons(){if(window.lucide)lucide.createIcons()}
+    function showNotice(message){notice.textContent=message;notice.classList.add('show')}
+    function addMessage(role,text,extraClass=''){
+      document.querySelector('#emptyState')?.remove();
+      const item=document.createElement('article');
+      item.className=`message ${role} ${extraClass}`.trim();
+      const label=document.createElement('span');
+      label.className='message-label';
+      label.textContent=role==='user'?'You':'Trained model';
+      const bubble=document.createElement('div');
+      bubble.className='bubble';
+      bubble.textContent=text;
+      item.append(label,bubble);
+      messages.append(item);
+      messages.scrollTop=messages.scrollHeight;
+      return item;
+    }
+    function clearConversation(){
+      messages.replaceChildren();
+      const empty=document.createElement('div');
+      empty.id='emptyState';empty.className='empty-state';
+      empty.innerHTML='<div class="empty-icon"><i data-lucide="message-circle"></i></div><strong>Start a conversation</strong><p>Your messages are sent to the selected completed model run.</p>';
+      messages.append(empty);refreshIcons();
+    }
+    function selectModel(jobId){
+      activeJob=trainedModels.find(job=>job.job_id===jobId)||null;
+      if(!activeJob)return;
+      document.querySelector('#statusText').textContent=`Ready · ${activeJob.model_name}`;
+      document.querySelector('#chatModelName').textContent=activeJob.model_name;
+      document.querySelector('#runInfo').textContent=`Run ${activeJob.job_id.slice(0,8)} · locally trained adapter`;
+      modelStatus.classList.remove('offline');
+      notice.classList.remove('show');
+      updateActionButtons();
+      clearConversation();
+    }
+    function updateActionButtons(){
+      const downloadButton=document.querySelector('#downloadModelBtn');
+      const deleteButton=document.querySelector('#deleteModelBtn');
+      if(!activeJob){
+        downloadButton.disabled=true;
+        deleteButton.disabled=true;
+        return;
+      }
+      downloadButton.disabled=false;
+      deleteButton.disabled=false;
+      downloadButton.title=`Download ${activeJob.model_name} adapter zip`;
+      deleteButton.title=`Delete ${activeJob.model_name} trained run`;
+    }
+
+    async function loadModel(){
+      try{
+        const response=await fetch('/api/uploads');
+        const data=await response.json();
+        if(!response.ok)throw new Error(data.detail||'Could not load model status.');
+        trainedModels=data.trained_models||[];
+        if(!trainedModels.length&&data.latest_job?.status==='completed'){
+          const model=data.models.find(item=>item.upload_id===data.latest_job.model_upload_id);
+          trainedModels=[{...data.latest_job,model_name:model?.repo_id||model?.model_type||'Trained model'}];
+        }
+        if(!trainedModels.length){
+          document.querySelector('#modelSelect').disabled=true;
+          document.querySelector('#modelSelect').replaceChildren(new Option('No completed models available',''));
+          document.querySelector('#downloadModelBtn').disabled=true;
+          document.querySelector('#deleteModelBtn').disabled=true;
+          modelStatus.classList.add('offline');
+          document.querySelector('#statusText').textContent=data.latest_job?.status==='failed'?'Latest training run failed':'No completed model found';
+          showNotice(data.latest_job?.error||'Complete a training run in the training workspace before using this page.');
+          return;
+        }
+        const select=document.querySelector('#modelSelect');
+        select.replaceChildren(...trainedModels.map(job=>{
+          const option=document.createElement('option');
+          option.value=job.job_id;
+          const date=job.created_at?` · ${new Date(job.created_at*1000).toLocaleString()}`:'';
+          option.textContent=`${job.model_name} · run ${job.job_id.slice(0,8)}${date}`;
+          return option;
+        }));
+        select.disabled=false;
+        select.value=trainedModels.some(job=>job.job_id===data.latest_job?.job_id)?data.latest_job.job_id:trainedModels[0].job_id;
+        select.addEventListener('change',()=>selectModel(select.value));
+        selectModel(select.value);
+      }catch(error){
+        modelStatus.classList.add('offline');
+        document.querySelector('#statusText').textContent='Backend unavailable';
+        showNotice(error.message||'Could not reach the local backend.');
+      }
+      refreshIcons();
+    }
+    async function sendMessage(event){
+      event.preventDefault();
+      const command=promptField.value.trim();
+      if(!command||pending)return;
+      if(!activeJob){showNotice('There is no completed trained model available yet.');return;}
+      notice.classList.remove('show');
+      addMessage('user',command);
+      promptField.value='';
+      pending=true;
+      sendButton.disabled=true;
+      const pendingMessage=addMessage('assistant','Generating response…','pending');
+      try{
+        const response=await fetch(`/api/training/${activeJob.job_id}/test`,{
+          method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command})
+        });
+        const result=await response.json();
+        if(!response.ok)throw new Error(result.detail||`Model request failed (${response.status}).`);
+        pendingMessage.remove();
+        addMessage('assistant',result.response||'The model returned an empty response.');
+      }catch(error){
+        pendingMessage.remove();
+        addMessage('assistant',error.message||'The model request failed.','error');
+      }finally{
+        pending=false;
+        sendButton.disabled=false;
+        promptField.focus();
+        refreshIcons();
+      }
+    }
+    document.querySelector('#downloadModelBtn').addEventListener('click',()=>{
+      if(!activeJob)return;
+      const link=document.createElement('a');
+      link.href=`/api/training/${activeJob.job_id}/download`;
+      link.download=`${activeJob.job_id}_adapter.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    });
+    document.querySelector('#deleteModelBtn').addEventListener('click',async()=>{
+      if(!activeJob)return;
+      const confirmed=window.confirm(`Delete the selected trained model run: ${activeJob.model_name}?`);
+      if(!confirmed)return;
+      try{
+        const response=await fetch(`/api/training/${activeJob.job_id}`,{method:'DELETE'});
+        const result=await response.json().catch(()=>({}));
+        if(!response.ok)throw new Error(result.detail||'Could not delete the trained model.');
+        showNotice('Selected trained model deleted.');
+        await loadModel();
+      }catch(error){
+        showNotice(error.message||'The trained model could not be deleted.');
+      }
+    });
+    document.querySelector('#chatForm').addEventListener('submit',sendMessage);
+    promptField.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();document.querySelector('#chatForm').requestSubmit()}});
+    document.querySelector('#clearChat').addEventListener('click',clearConversation);
+    loadModel();
+  </script>
+</body>
+</html>
