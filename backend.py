@@ -779,7 +779,7 @@ def start_training(request: TrainingRequest) -> dict:
     runtime = _training_runtime()
     if not runtime["training_ready"]:
         missing = ", ".join(runtime["missing_packages"]) or "CUDA-enabled PyTorch and an NVIDIA GPU"
-        raise HTTPException(status_code=503, detail=f"Local training is unavailable. Missing: {missing}.")
+        raise HTTPException(status_code=503, detail=f"Local CUDA training is not ready. Install the training dependencies, then restart the app. Missing: {missing}.")
 
     dataset_path = _find_dataset(request.dataset_upload_id)
     if not _validate_dataset(dataset_path)["valid"]:
