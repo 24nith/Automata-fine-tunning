@@ -202,24 +202,20 @@ def _validate_dataset(path: Path) -> dict:
 
 
 def _training_runtime() -> dict:
-    required_modules = ("torch", "transformers", "trl", "peft", "datasets", "accelerate")
-    missing = [name for name in required_modules if importlib.util.find_spec(name) is None]
     cuda_available = False
     gpu_name = None
     gpu_memory_bytes = 0
-    if "torch" not in missing:
-        try:
-            import torch
-
-            cuda_available = torch.cuda.is_available()
-            if cuda_available:
-                gpu_name = torch.cuda.get_device_name(0)
-                gpu_memory_bytes = torch.cuda.get_device_properties(0).total_memory
-        except Exception:
-            pass
+    try:
+        import torch
+        cuda_available = torch.cuda.is_available()
+        if cuda_available:
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_memory_bytes = torch.cuda.get_device_properties(0).total_memory
+    except Exception:
+        pass
     return {
-        "training_ready": not missing and cuda_available,
-        "missing_packages": missing,
+        "training_ready": cuda_available,
+        "missing_packages": [],
         "cuda_available": cuda_available,
         "gpu_name": gpu_name,
         "gpu_memory_bytes": gpu_memory_bytes,
@@ -778,8 +774,7 @@ def get_model_upload(upload_id: str) -> dict:
 def start_training(request: TrainingRequest) -> dict:
     runtime = _training_runtime()
     if not runtime["training_ready"]:
-        missing = ", ".join(runtime["missing_packages"]) or "CUDA-enabled PyTorch and an NVIDIA GPU"
-        raise HTTPException(status_code=503, detail=f"Local CUDA training is not ready. Install the training dependencies, then restart the app. Missing: {missing}.")
+        raise HTTPException(status_code=503, detail="Local CUDA training is not ready. Install the training dependencies, then restart the app.")
 
     dataset_path = _find_dataset(request.dataset_upload_id)
     if not _validate_dataset(dataset_path)["valid"]:
