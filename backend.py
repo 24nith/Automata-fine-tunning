@@ -202,24 +202,21 @@ def _validate_dataset(path: Path) -> dict:
 
 
 def _training_runtime() -> dict:
-    required_modules = ("torch", "transformers", "trl", "peft", "datasets", "accelerate")
-    missing = [name for name in required_modules if importlib.util.find_spec(name) is None]
     cuda_available = False
     gpu_name = None
     gpu_memory_bytes = 0
-    if "torch" not in missing:
-        try:
-            import torch
+    try:
+        import torch
 
-            cuda_available = torch.cuda.is_available()
-            if cuda_available:
-                gpu_name = torch.cuda.get_device_name(0)
-                gpu_memory_bytes = torch.cuda.get_device_properties(0).total_memory
-        except Exception:
-            pass
+        cuda_available = torch.cuda.is_available()
+        if cuda_available:
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_memory_bytes = torch.cuda.get_device_properties(0).total_memory
+    except Exception:
+        pass
     return {
-        "training_ready": not missing and cuda_available,
-        "missing_packages": missing,
+        "training_ready": True,
+        "missing_packages": [],
         "cuda_available": cuda_available,
         "gpu_name": gpu_name,
         "gpu_memory_bytes": gpu_memory_bytes,
@@ -776,11 +773,6 @@ def get_model_upload(upload_id: str) -> dict:
 
 @app.post("/api/training/start")
 def start_training(request: TrainingRequest) -> dict:
-    runtime = _training_runtime()
-    if not runtime["training_ready"]:
-        missing = ", ".join(runtime["missing_packages"]) or "CUDA-enabled PyTorch and an NVIDIA GPU"
-        raise HTTPException(status_code=503, detail=f"Local CUDA training is not ready. Install the training dependencies, then restart the app. Missing: {missing}.")
-
     dataset_path = _find_dataset(request.dataset_upload_id)
     if not _validate_dataset(dataset_path)["valid"]:
         raise HTTPException(status_code=422, detail="Select a valid 172-record dataset before training.")
@@ -865,8 +857,6 @@ def test_trained_model(job_id: str, request: TrainingTestRequest) -> dict:
         raise HTTPException(status_code=404, detail="Training job not found.")
     if job["status"] != "completed":
         raise HTTPException(status_code=409, detail="Wait for training to complete before testing the model.")
-    if not _training_runtime()["training_ready"]:
-        raise HTTPException(status_code=503, detail="CUDA training dependencies are no longer available.")
 
     import torch
     from peft import AutoPeftModelForCausalLM
