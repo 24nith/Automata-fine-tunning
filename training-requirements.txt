@@ -1,3 +1,4 @@
+torch>=2.2.0
 transformers>=4.48,<4.52
 trl==0.15.2
 peft>=0.14,<0.18
@@ -5,3 +6,4 @@ datasets>=3,<5
 accelerate>=1.2,<2
 safetensors>=0.4
 sentencepiece>=0.2
+bitsandbytes>=0.43.0

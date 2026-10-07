@@ -83,6 +83,7 @@ def _hf_request(url: str) -> bytes:
         raise HTTPException(status_code=502, detail=f"Hugging Face returned HTTP {error.code}.") from error
     except urllib.error.URLError as error:
         raise HTTPException(status_code=502, detail=f"Could not reach Hugging Face: {error.reason}") from error
+    return None
 
 
 def _hf_download_to_path(url: str, target: Path, remaining_bytes: int) -> int:
@@ -117,7 +118,7 @@ def _hf_download_to_path(url: str, target: Path, remaining_bytes: int) -> int:
 def _download_huggingface_model(request: HuggingFaceModelRequest) -> dict:
     repo_id = request.repo_id
     encoded_repo = urllib.parse.quote(repo_id, safe="/")
-    tree_url = f"https://huggingface.co/api/models/{encoded_repo}/tree/{urllib.parse.quote(request.revision, safe='')}?recursive=true&expand=false"
+    tree_url = f"https://huggingface.co/api/models/{encoded_repo}/tree/{urllib.parse.quote(request.revision, safe='')}/{urllib.parse.quote(normalized.as_posix(), safe='/')}?recursive=true&expand=false"
     try:
         tree = json.loads(_hf_request(tree_url))
     except json.JSONDecodeError as error:
@@ -262,37 +263,6 @@ def _restore_job(job_id: str) -> dict | None:
             JOBS.setdefault(job_id, job)
             return JOBS[job_id]
 
-    adapter_dir = RUNS / job_id / "adapter"
-    adapter_config = adapter_dir / "adapter_config.json"
-    adapter_weights = adapter_dir / "adapter_model.safetensors"
-    if not adapter_config.is_file() or not adapter_weights.is_file():
-        return None
-    try:
-        config = json.loads(adapter_config.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    model_upload_id = Path(str(config.get("base_model_name_or_path", ""))).name
-    if not re.fullmatch(r"[0-9a-f]{32}", model_upload_id):
-        return None
-    created_at = adapter_dir.stat().st_mtime
-    job = {
-        "job_id": job_id,
-        "status": "completed",
-        "progress": 100,
-        "step": 0,
-        "total_steps": 0,
-        "loss": None,
-        "message": "Training completed; adapter and tokenizer saved",
-        "model_upload_id": model_upload_id,
-        "created_at": created_at,
-        "updated_at": created_at,
-        "output_path": str(adapter_dir.relative_to(ROOT)),
-    }
-    _persist_job(job)
-    with JOBS_LOCK:
-        JOBS.setdefault(job_id, job)
-        return JOBS[job_id]
-
 
 def _update_job(job_id: str, **changes) -> None:
     with JOBS_LOCK:
@@ -331,7 +301,7 @@ def _validate_model_directory(model_root: Path) -> dict:
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise HTTPException(status_code=422, detail="Model config.json is not valid UTF-8 JSON.") from error
+        raise HTTPException(status_code=422, detail=f"Model config.json is not valid UTF-8 JSON.") from error
     if not isinstance(config, dict) or not isinstance(config.get("model_type"), str):
         raise HTTPException(status_code=422, detail="Model config.json must declare a model_type.")
 
@@ -352,31 +322,13 @@ def _validate_model_directory(model_root: Path) -> dict:
     tokenizer_files = sorted(
         name
         for name in filenames
-        if name in {"tokenizer.json", "tokenizer.model", "spiece.model", "sentencepiece.bpe.model", "vocab.txt"}
-    )
-    if not tokenizer_files and not {"vocab.json", "merges.txt"}.issubset(filenames):
-        raise HTTPException(
-            status_code=422,
-            detail="Model folder must include tokenizer.json, a SentencePiece model, vocab.txt, or vocab.json with merges.txt.",
-        )
-    tokenizer_json = next((path for path in files if path.name.lower() == "tokenizer.json"), None)
-    if tokenizer_json is not None:
-        try:
-            if not isinstance(json.loads(tokenizer_json.read_text(encoding="utf-8")), dict):
-                raise ValueError("tokenizer.json must contain an object")
-        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-            raise HTTPException(status_code=422, detail=f"Invalid tokenizer.json: {error}") from error
-
-    shard_indexes = [path for path in files if path.name.lower() in {"model.safetensors.index.json", "pytorch_model.bin.index.json"}]
+        if name in {"model.safetensors.index.json", "pytorch_model.bin.index.json"})
     for index_path in shard_indexes:
         try:
             weight_map = json.loads(index_path.read_text(encoding="utf-8")).get("weight_map")
         except (UnicodeDecodeError, json.JSONDecodeError, AttributeError) as error:
-            raise HTTPException(status_code=422, detail=f"Invalid weight index {index_path.name}.") from error
-        if not isinstance(weight_map, dict) or not weight_map:
-            raise HTTPException(status_code=422, detail=f"Weight index {index_path.name} has no weight_map.")
-        if any(not isinstance(name, str) or PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts for name in weight_map.values()):
-            raise HTTPException(status_code=422, detail=f"Weight index {index_path.name} contains invalid shard paths.")
+            raise HTTPException(status_code=422, detail=f"Invalid weight index {index_path.name}.")
+
         missing_shards = sorted({name for name in weight_map.values() if not (index_path.parent / name).is_file()})
         if missing_shards:
             raise HTTPException(status_code=422, detail=f"Model is missing weight shards: {', '.join(missing_shards[:5])}.")
@@ -399,7 +351,7 @@ def _validate_model_directory(model_root: Path) -> dict:
                 tensor_entries = {name: details for name, details in header.items() if name != "__metadata__"}
                 data_size = weight_path.stat().st_size - 8 - header_length
                 if not tensor_entries:
-                    raise ValueError("no tensors were declared")
+                    raise ValueError(f"no tensors were declared")
                 for tensor_name, details in tensor_entries.items():
                     offsets = details.get("data_offsets") if isinstance(details, dict) else None
                     shape = details.get("shape") if isinstance(details, dict) else None
@@ -407,12 +359,11 @@ def _validate_model_directory(model_root: Path) -> dict:
                         not isinstance(tensor_name, str)
                         or not isinstance(offsets, list)
                         or len(offsets) != 2
-                        or any(not isinstance(offset, int) for offset in offsets)
-                        or offsets[0] < 0
-                        or offsets[1] < offsets[0]
-                        or offsets[1] > data_size
-                        or not isinstance(shape, list)
-                        or any(not isinstance(dimension, int) or dimension < 0 for dimension in shape)
+                        or any(not isinstance(offset, int) or offset < 0
+                            or offsets[1] < offsets[0]
+                            or offsets[1] > data_size
+                            or not isinstance(shape, list)
+                            or any(dimension < 0 or dimension >= len(shape)) for dimension in shape)
                     ):
                         raise ValueError(f"tensor metadata is invalid for {tensor_name}")
             except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
@@ -455,6 +406,7 @@ def _format_training_record(record: dict, tokenizer=None) -> str:
                 {"role": "assistant", "content": record["output"]},
             ],
             tokenize=False,
+            add_generation_prompt=True,
         )
     return (
         f"### Instruction\n{record['instruction']}\n\n"
@@ -608,67 +560,30 @@ def _run_training(job_id: str, dataset_path: Path, model_dir: Path, config: Trai
             pass
 
 
-async def _copy_upload(upload: UploadFile, destination: Path, byte_limit: int) -> int:
-    size = 0
-    with destination.open("wb") as target:
-        while chunk := await upload.read(CHUNK_SIZE):
-            size += len(chunk)
-            if size > byte_limit:
-                raise HTTPException(status_code=413, detail="Upload exceeds the size limit.")
-            target.write(chunk)
-    return size
+async def _copy_upload(upload: UploadFile = File(...)) -> int:
+    if Path(upload.filename or "").suffix.lower() not in {".jsonl", ".json"}:
+        raise HTTPException(status_code=415, detail="Upload a .jsonl or .json dataset.")
 
+    upload_id = uuid4().hex
+    destination = DATASETS / f"{upload_id}_{_safe_name(upload.filename or '')}"
+    temporary = destination.with_suffix(destination.suffix + ".part")
+    try:
+        size = await _copy_upload(upload, temporary, MAX_DATASET_BYTES)
+        validation = _validate_dataset(temporary)
+        temporary.replace(destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
 
-@app.get("/api/health")
-def health() -> dict:
     return {
-        "status": "ok",
-        "storage": "local",
-        "max_dataset_bytes": MAX_DATASET_BYTES,
-        "max_model_bytes": MAX_MODEL_BYTES,
-        **_training_runtime(),
+        "upload_id": upload_id,
+        "filename": _safe_name(upload.filename or ""),
+        "size_bytes": size,
+        "stored": True,
+        **validation,
     }
-
-
-@app.get("/api/uploads")
-def list_uploads() -> dict:
-    datasets = []
-    for path in sorted(DATASETS.glob("*"), key=lambda item: item.stat().st_mtime, reverse=True):
-        if not path.is_file() or path.name.endswith(".part"):
-            continue
-        upload_id, _, filename = path.name.partition("_")
-        if re.fullmatch(r"[0-9a-f]{32}", upload_id):
-            datasets.append({"upload_id": upload_id, "filename": filename, **_validate_dataset(path)})
-
-    models = []
-    for model_dir in sorted(MODELS.iterdir(), key=lambda item: item.stat().st_mtime, reverse=True):
-        manifest_path = model_dir / "automata-upload.json"
-        if model_dir.is_dir() and manifest_path.is_file():
-            models.append(json.loads(manifest_path.read_text(encoding="utf-8")))
-    for run_dir in RUNS.iterdir():
-        if run_dir.is_dir():
-            _restore_job(run_dir.name)
-    with JOBS_LOCK:
-        latest_job = max(JOBS.values(), key=lambda item: item["created_at"], default=None)
-        latest_job = dict(latest_job) if latest_job else None
-        completed_jobs = sorted(
-            (dict(job) for job in JOBS.values() if job["status"] == "completed"),
-            key=lambda job: job["created_at"],
-            reverse=True,
-        )
-    model_by_id = {model["upload_id"]: model for model in models}
-    trained_models = [
-        {
-            "job_id": job["job_id"],
-            "model_upload_id": job["model_upload_id"],
-            "model_name": model_by_id.get(job["model_upload_id"], {}).get("repo_id")
-            or model_by_id.get(job["model_upload_id"], {}).get("model_type")
-            or "Trained model",
-            "created_at": job["created_at"],
-        }
-        for job in completed_jobs
-    ]
-    return {"datasets": datasets, "models": models, "latest_job": latest_job, "trained_models": trained_models}
 
 
 @app.post("/api/uploads/dataset")
@@ -741,6 +656,7 @@ async def upload_model(
             **model_info,
         }
         (destination / "automata-upload.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        return manifest
     except Exception:
         shutil.rmtree(destination, ignore_errors=True)
         raise
@@ -821,7 +737,7 @@ def download_trained_model(job_id: str):
     if job is None:
         raise HTTPException(status_code=404, detail="Training job not found.")
     if job["status"] != "completed":
-        raise HTTPException(status_code=409, detail="Training must be completed before downloading the adapter.")
+        raise HTTPException(status_code=409, detail="Wait for training to complete before downloading the adapter.")
 
     adapter_dir = ROOT / job["output_path"]
     if not adapter_dir.is_dir():
