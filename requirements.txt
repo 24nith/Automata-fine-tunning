@@ -1,3 +1,10 @@
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 python-multipart>=0.0.9
+torch
+transformers
+accelerate
+datasets
+peft
+bitsandbytes
+trl
