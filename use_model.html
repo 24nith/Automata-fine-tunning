@@ -47,6 +47,17 @@
     const sendButton = document.querySelector('#sendButton');
     const notice = document.querySelector('#notice');
     const modelStatus = document.querySelector('#modelStatus');
+    const localBackendUrl = (() => {
+      try {
+        const url = new URL(localStorage.getItem('automataLocalBackend') || '');
+        return url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)
+          && url.port === '8000' && url.pathname === '/' && !url.search && !url.hash
+          ? url.origin : '';
+      } catch {
+        return '';
+      }
+    })();
+    const apiUrl = path => localBackendUrl ? `${localBackendUrl}${path}` : path;
     let activeJob = null;
     let pending = false;
     let trainedModels = [];
@@ -102,7 +113,20 @@
 
     async function loadModel(){
       try{
-        const response=await fetch('/api/uploads');
+        const healthResponse=await fetch(apiUrl('/api/health'));
+        const runtime=await healthResponse.json();
+        if(!healthResponse.ok)throw new Error(runtime.detail||'Could not check the training backend.');
+        if(runtime.render_hosted){
+          document.querySelector('#modelSelect').disabled=true;
+          document.querySelector('#modelSelect').replaceChildren(new Option('Connect your PC to load trained models',''));
+          document.querySelector('#downloadModelBtn').disabled=true;
+          document.querySelector('#deleteModelBtn').disabled=true;
+          modelStatus.classList.add('offline');
+          document.querySelector('#statusText').textContent='Local PC connection required';
+          showNotice('This hosted website cannot access your trained models. Connect your local backend from the Local runtime step; trained models are stored on your PC.');
+          return;
+        }
+        const response=await fetch(apiUrl('/api/uploads'));
         const data=await response.json();
         if(!response.ok)throw new Error(data.detail||'Could not load model status.');
         trainedModels=data.trained_models||[];
@@ -151,7 +175,7 @@
       sendButton.disabled=true;
       const pendingMessage=addMessage('assistant','Generating response…','pending');
       try{
-        const response=await fetch(`/api/training/${activeJob.job_id}/test`,{
+        const response=await fetch(apiUrl(`/api/training/${activeJob.job_id}/test`),{
           method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command})
         });
         const result=await response.json();
@@ -171,7 +195,7 @@
     document.querySelector('#downloadModelBtn').addEventListener('click',()=>{
       if(!activeJob)return;
       const link=document.createElement('a');
-      link.href=`/api/training/${activeJob.job_id}/download`;
+      link.href=apiUrl(`/api/training/${activeJob.job_id}/download`);
       link.download=`${activeJob.job_id}_adapter.zip`;
       document.body.appendChild(link);
       link.click();
@@ -182,7 +206,7 @@
       const confirmed=window.confirm(`Delete the selected trained model run: ${activeJob.model_name}?`);
       if(!confirmed)return;
       try{
-        const response=await fetch(`/api/training/${activeJob.job_id}`,{method:'DELETE'});
+        const response=await fetch(apiUrl(`/api/training/${activeJob.job_id}`),{method:'DELETE'});
         const result=await response.json().catch(()=>({}));
         if(!response.ok)throw new Error(result.detail||'Could not delete the trained model.');
         showNotice('Selected trained model deleted.');

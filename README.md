@@ -32,6 +32,21 @@ This computer has an RTX 2050 with 4 GB VRAM. Start with a 1B model, batch size 
 
 Uploaded files are stored under `uploads/` on this computer and are excluded from Git. Training and inference stay on this device.
 
+## Deploy the website to Render
+
+Render's standard web-service instances do not provide a CUDA GPU. The website can still let each user train on their own Windows GPU by connecting the browser to the complete local backend. Dataset uploads, model files, training jobs, and trained adapters then stay on that user's computer; Render cannot access those local files or run the training job.
+
+On the GPU computer, install the local dependencies and CUDA-enabled PyTorch as described above. Set `AUTOMATA_WEB_ORIGINS` to the exact HTTPS origin of the deployed website (no path or trailing slash), then start the local backend:
+
+   ```powershell
+   $env:AUTOMATA_WEB_ORIGINS = "https://your-service.onrender.com"
+   .\.venv\Scripts\python.exe backend.py
+   ```
+
+Open the Render site, choose **Local runtime**, and click **Connect PC to train** using `http://127.0.0.1:8000`. Confirm the website's connection request and allow the browser's local-network permission if prompted. The saved local-backend address is not reconnected automatically; you must approve the connection each time you open the website. Once connected, upload the dataset and base model in the website; the files are sent to the local backend. Keep the backend running for uploads, training, testing, and downloads.
+
+The backend binds only to `127.0.0.1`. Cross-origin access is disabled unless `AUTOMATA_WEB_ORIGINS` is set, and then only the exact configured HTTPS website origin is allowed. Disconnecting stops the website from using the local backend. Do not bind the backend to `0.0.0.0` or expose it to the internet. Users who open the website on devices without the local backend still get the website, but cannot train until they run the backend on a CUDA-enabled NVIDIA PC.
+
 ## Download a model from Hugging Face
 
 In the Model step, enter a public repository ID such as `Qwen/Qwen2.5-0.5B-Instruct` and click **Download and validate model**. The backend streams the repository files to local storage, validates the causal-LM config, tokenizer, weights, and shard indexes, then makes the model available to the Train step. Private or gated repositories require an `HF_TOKEN` environment variable before starting the backend.

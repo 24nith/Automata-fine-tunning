@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
+import logging
+import os
 import re
 import shutil
 import urllib.error
@@ -12,9 +15,11 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 from threading import Lock
 from time import time
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -37,6 +42,48 @@ app = FastAPI(title="Automata Fine Tuning backend", docs_url=None, redoc_url=Non
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = Lock()
 TRAINING_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="automata-train")
+LOGGER = logging.getLogger(__name__)
+
+
+def _configure_web_cors(application: FastAPI, origins: list[str] | None = None) -> list[str]:
+    configured = origins
+    if configured is None:
+        configured = [
+            origin.strip()
+            for origin in os.environ.get("AUTOMATA_WEB_ORIGINS", "").split(",")
+            if origin.strip()
+        ]
+    for origin in configured:
+        parsed = urlsplit(origin)
+        if (
+            parsed.scheme != "https"
+            or not parsed.netloc
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or parsed.username
+            or parsed.password
+        ):
+            raise RuntimeError(
+                "AUTOMATA_WEB_ORIGINS must contain exact HTTPS origins without paths, queries, or credentials."
+            )
+    if configured:
+        private_network_option = (
+            {"allow_private_network": True}
+            if "allow_private_network" in inspect.signature(CORSMiddleware.__init__).parameters
+            else {}
+        )
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=configured,
+            allow_methods=["GET", "POST", "DELETE"],
+            allow_headers=["Content-Type"],
+            **private_network_option,
+        )
+    return configured
+
+
+ALLOWED_WEB_ORIGINS = _configure_web_cors(app)
 
 
 class TrainingRequest(BaseModel):
@@ -201,25 +248,103 @@ def _validate_dataset(path: Path) -> dict:
     }
 
 
-def _training_runtime() -> dict:
-    cuda_available = False
-    gpu_name = None
-    gpu_memory_bytes = 0
+def _gpu_status() -> dict:
+    result = {
+        "cuda_ready": False,
+        "gpu_name": None,
+        "total_vram_gb": None,
+        "free_vram_gb": None,
+        "total_vram_bytes": None,
+        "free_vram_bytes": None,
+        "message": "CUDA status has not been checked.",
+    }
+    if importlib.util.find_spec("torch") is None:
+        result["message"] = "PyTorch is not installed in this Python environment."
+        return result
+
     try:
         import torch
 
-        cuda_available = torch.cuda.is_available()
-        if cuda_available:
-            gpu_name = torch.cuda.get_device_name(0)
-            gpu_memory_bytes = torch.cuda.get_device_properties(0).total_memory
-    except Exception:
-        pass
+        if not torch.cuda.is_available():
+            result["message"] = (
+                "CUDA is unavailable to PyTorch. Check the NVIDIA driver and install a CUDA-enabled PyTorch build."
+            )
+            return result
+
+        device_index = torch.cuda.current_device()
+        properties = torch.cuda.get_device_properties(device_index)
+        free_bytes, _ = torch.cuda.mem_get_info(device_index)
+        total_bytes = properties.total_memory
+        if not isinstance(properties.name, str) or not properties.name.strip():
+            raise RuntimeError("PyTorch could not report a CUDA GPU name.")
+        if total_bytes <= 0 or free_bytes < 0 or free_bytes > total_bytes:
+            raise RuntimeError("PyTorch returned invalid CUDA memory information.")
+
+        result.update(
+            cuda_ready=True,
+            gpu_name=properties.name,
+            total_vram_gb=round(total_bytes / (1024**3), 2),
+            free_vram_gb=round(free_bytes / (1024**3), 2),
+            total_vram_bytes=total_bytes,
+            free_vram_bytes=free_bytes,
+            message="CUDA GPU detected and memory information verified.",
+        )
+    except Exception as error:
+        LOGGER.exception("Could not verify the CUDA GPU and memory information")
+        result["message"] = f"CUDA GPU detection failed: {error}"
+
+    return result
+
+
+def _training_runtime() -> dict:
+    render_hosted = os.environ.get("RENDER", "").lower() == "true"
+    if render_hosted:
+        return {
+            "training_ready": False,
+            "training_status": "local_gpu_required",
+            "training_message": (
+                "This website is running on Render and cannot access your computer's GPU or run local fine-tuning. "
+                "Start the Automata backend on your CUDA-enabled computer and connect it from the website to train."
+            ),
+            "missing_packages": [],
+            "cuda_available": False,
+            "gpu_name": None,
+            "gpu_memory_bytes": 0,
+            "gpu_free_memory_bytes": 0,
+            "gpu_error": None,
+            "render_hosted": True,
+        }
+
+    required_modules = ("torch", "transformers", "trl", "peft", "datasets", "accelerate")
+    missing = [name for name in required_modules if importlib.util.find_spec(name) is None]
+    gpu = _gpu_status()
+    cuda_available = gpu["cuda_ready"]
+
+    if not missing and cuda_available:
+        status = "ready"
+        message = "CUDA training runtime is ready."
+    elif cuda_available:
+        status = "missing_packages"
+        message = (
+            "CUDA is available, but the training dependencies are missing: "
+            + ", ".join(missing)
+            + ". Install the project requirements and restart the backend."
+        )
+    else:
+        status = "gpu_required"
+        message = gpu["message"]
+
     return {
-        "training_ready": True,
-        "missing_packages": [],
+        "training_ready": not missing and cuda_available,
+        "training_status": status,
+        "training_message": message,
+        "missing_packages": missing,
         "cuda_available": cuda_available,
-        "gpu_name": gpu_name,
-        "gpu_memory_bytes": gpu_memory_bytes,
+        "gpu_name": gpu["gpu_name"],
+        "gpu_memory_bytes": gpu["total_vram_bytes"] or 0,
+        "gpu_free_memory_bytes": gpu["free_vram_bytes"] or 0,
+        "gpu_error": None if cuda_available else gpu["message"],
+        "render_hosted": False,
     }
 
 
@@ -773,6 +898,10 @@ def get_model_upload(upload_id: str) -> dict:
 
 @app.post("/api/training/start")
 def start_training(request: TrainingRequest) -> dict:
+    runtime = _training_runtime()
+    if not runtime["training_ready"]:
+        raise HTTPException(status_code=503, detail=runtime["training_message"])
+
     dataset_path = _find_dataset(request.dataset_upload_id)
     if not _validate_dataset(dataset_path)["valid"]:
         raise HTTPException(status_code=422, detail="Select a valid 172-record dataset before training.")
@@ -857,6 +986,8 @@ def test_trained_model(job_id: str, request: TrainingTestRequest) -> dict:
         raise HTTPException(status_code=404, detail="Training job not found.")
     if job["status"] != "completed":
         raise HTTPException(status_code=409, detail="Wait for training to complete before testing the model.")
+    if not _training_runtime()["training_ready"]:
+        raise HTTPException(status_code=503, detail="CUDA training dependencies are no longer available.")
 
     import torch
     from peft import AutoPeftModelForCausalLM
@@ -914,12 +1045,18 @@ def test_trained_model(job_id: str, request: TrainingTestRequest) -> dict:
 
 @app.get("/")
 def home() -> FileResponse:
-    return FileResponse(ROOT / "index.html")
+    return FileResponse(
+        ROOT / "index.html",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"},
+    )
 
 
 @app.get("/use-model")
 def use_model_page() -> FileResponse:
-    return FileResponse(ROOT / "use_model.html")
+    return FileResponse(
+        ROOT / "use_model.html",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"},
+    )
 
 
 if __name__ == "__main__":
