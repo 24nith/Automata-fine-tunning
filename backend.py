@@ -368,7 +368,7 @@ def _restore_job(job_id: str) -> dict | None:
     if job_file.is_file():
         try:
             job = json.loads(job_file.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             return None
         if not isinstance(job, dict) or job.get("job_id") != job_id:
             return None
@@ -383,37 +383,6 @@ def _restore_job(job_id: str) -> dict | None:
         with JOBS_LOCK:
             JOBS.setdefault(job_id, job)
             return JOBS[job_id]
-
-    adapter_dir = RUNS / job_id / "adapter"
-    adapter_config = adapter_dir / "adapter_config.json"
-    adapter_weights = adapter_dir / "adapter_model.safetensors"
-    if not adapter_config.is_file() or not adapter_weights.is_file():
-        return None
-    try:
-        config = json.loads(adapter_config.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    model_upload_id = Path(str(config.get("base_model_name_or_path", ""))).name
-    if not re.fullmatch(r"[0-9a-f]{32}", model_upload_id):
-        return None
-    created_at = adapter_dir.stat().st_mtime
-    job = {
-        "job_id": job_id,
-        "status": "completed",
-        "progress": 100,
-        "step": 0,
-        "total_steps": 0,
-        "loss": None,
-        "message": "Training completed; adapter and tokenizer saved",
-        "model_upload_id": model_upload_id,
-        "created_at": created_at,
-        "updated_at": created_at,
-        "output_path": str(adapter_dir.relative_to(ROOT)),
-    }
-    _persist_job(job)
-    with JOBS_LOCK:
-        JOBS.setdefault(job_id, job)
-        return JOBS[job_id]
 
 
 def _update_job(job_id: str, **changes) -> None:
@@ -441,7 +410,7 @@ def _find_model_directory(upload_id: str) -> Path:
         raise HTTPException(status_code=404, detail="Model upload not found.")
     config_path = next(model_root.rglob("config.json"), None)
     if config_path is None:
-        raise HTTPException(status_code=422, detail="Uploaded model has no config.json.")
+        raise HTTPException(status_code=422, detail="Model folder must contain config.json.")
     return config_path.parent
 
 
@@ -453,7 +422,7 @@ def _validate_model_directory(model_root: Path) -> dict:
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise HTTPException(status_code=422, detail="Model config.json is not valid UTF-8 JSON.") from error
+        raise HTTPException(status_code=422, detail=f"Model config.json is not valid UTF-8 JSON.") from error
     if not isinstance(config, dict) or not isinstance(config.get("model_type"), str):
         raise HTTPException(status_code=422, detail="Model config.json must declare a model_type.")
 
@@ -521,7 +490,7 @@ def _validate_model_directory(model_root: Path) -> dict:
                 tensor_entries = {name: details for name, details in header.items() if name != "__metadata__"}
                 data_size = weight_path.stat().st_size - 8 - header_length
                 if not tensor_entries:
-                    raise ValueError("no tensors were declared")
+                    raise ValueError(f"no tensors were declared")
                 for tensor_name, details in tensor_entries.items():
                     offsets = details.get("data_offsets") if isinstance(details, dict) else None
                     shape = details.get("shape") if isinstance(details, dict) else None
@@ -577,6 +546,7 @@ def _format_training_record(record: dict, tokenizer=None) -> str:
                 {"role": "assistant", "content": record["output"]},
             ],
             tokenize=False,
+            add_generation_prompt=True,
         )
     return (
         f"### Instruction\n{record['instruction']}\n\n"
@@ -846,8 +816,6 @@ async def upload_model(
             normalized = PurePosixPath(raw_path.replace("\\", "/"))
             if normalized.is_absolute() or any(part in {"..", "."} for part in normalized.parts):
                 raise HTTPException(status_code=400, detail="Model paths cannot escape the upload folder.")
-            if normalized.parts and ":" in normalized.parts[0]:
-                raise HTTPException(status_code=400, detail="Absolute model paths are not allowed.")
             target = destination / Path(*normalized.parts)
             target.parent.mkdir(parents=True, exist_ok=True)
             total_size += await _copy_upload(upload, target, MAX_MODEL_BYTES - total_size)
@@ -942,7 +910,7 @@ def download_trained_model(job_id: str):
     if job is None:
         raise HTTPException(status_code=404, detail="Training job not found.")
     if job["status"] != "completed":
-        raise HTTPException(status_code=409, detail="Training must be completed before downloading the adapter.")
+        raise HTTPException(status_code=409, detail="Wait for training to complete before downloading the adapter.")
 
     adapter_dir = ROOT / job["output_path"]
     if not adapter_dir.is_dir():
